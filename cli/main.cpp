@@ -52,7 +52,14 @@ void usage() {
         "crack / gpucrack 选项:\n"
         "  --mode dict|mask|hybrid   --dict a.txt,b.txt   --rules best64lite,leet\n"
         "  --mask ?l?l?l?l?d?d       --hybrid ?d?d        --threads N\n"
-        "  --min N --max N           --pot file.pot\n");
+        "  --min N --max N           --pot file.pot\n"
+        "\n"
+        "免责声明 / DISCLAIMER:\n"
+        "  本工具仅限【已获得合法授权】的场景使用：恢复自有或客户所属压缩包的口令、\n"
+        "  评估口令强度、验证备份加密方案、安全教学与 CTF。\n"
+        "  禁止用于未授权访问他人数据、规避技术保护措施或任何违法用途。\n"
+        "  使用者对一切操作及其后果承担全部责任；本软件按 MIT 许可「按原样」提供。\n"
+        "  完整条款见仓库根目录 DISCLAIMER.md。\n");
 }
 
 std::vector<std::string> split(const std::string& s, char sep) {

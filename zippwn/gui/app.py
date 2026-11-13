@@ -23,7 +23,7 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout,
@@ -249,6 +249,9 @@ class MainWindow(QMainWindow):
         btn_self = QPushButton("内核自测")
         btn_self.clicked.connect(self._selftest)
         top.addWidget(btn_self)
+        btn_disc = QPushButton("免责声明")
+        btn_disc.clicked.connect(self._show_disclaimer)
+        top.addWidget(btn_disc)
         root.addLayout(top)
 
         # --- 中部：左配置 右输出 ---
@@ -430,7 +433,13 @@ class MainWindow(QMainWindow):
         split.addWidget(right)
         split.setSizes([420, 700])
         root.addWidget(split, 1)
+
+        notice = QLabel("⚠ 仅限授权用途 · 详见免责声明")
+        notice.setStyleSheet("color:#c9a227;padding-right:10px;")
+        self.statusBar().addPermanentWidget(notice)
         self.statusBar().showMessage("就绪")
+        # 首次启动弹一次确认，之后不再打扰
+        QTimer.singleShot(300, self._maybe_show_disclaimer)
 
     # ---------------- 事件 ----------------
     def _log(self, s: str) -> None:
@@ -482,6 +491,48 @@ class MainWindow(QMainWindow):
         self._log("=== 密码学官方向量自测 ===")
         for line in rep.splitlines():
             self._log("  " + line)
+
+    # ---------------- 免责声明 ----------------
+    DISCLAIMER_HTML = (
+        "<h3>免责声明 / Disclaimer</h3>"
+        "<p><b>ZipPwn 是安全研究与数字取证工具</b>，仅可用于<b>已获得合法授权</b>的场景：</p>"
+        "<ul>"
+        "<li>恢复自己或客户所属压缩包的口令</li>"
+        "<li>评估自有归档的口令强度</li>"
+        "<li>验证备份与加密方案是否可靠</li>"
+        "<li>安全教学与 CTF 竞赛</li>"
+        "</ul>"
+        "<p><b>禁止</b>用于未授权访问他人数据、规避技术保护措施，或任何违反当地法律法规的行为。</p>"
+        "<p>使用者对所进行的一切操作及其后果承担<b>全部责任</b>。作者与贡献者不对因使用或误用本工具"
+        "造成的任何直接或间接损失、法律责任承担责任。</p>"
+        "<p>本软件依据 MIT 许可证「按原样」提供，不附带任何明示或默示担保。</p>"
+        "<p style='color:#888'>完整条款见仓库根目录 <code>DISCLAIMER.md</code>。</p>"
+    )
+
+    def _maybe_show_disclaimer(self) -> None:
+        s = QSettings("ZipPwn", "ZipPwn")
+        if str(s.value("disclaimer/accepted", "false")).lower() == "true":
+            return
+        self._show_disclaimer(first_run=True)
+
+    def _show_disclaimer(self, first_run: bool = False) -> None:
+        box = QMessageBox(self)
+        box.setWindowTitle("免责声明 / Disclaimer")
+        box.setTextFormat(Qt.RichText)
+        box.setText(self.DISCLAIMER_HTML)
+        box.setIcon(QMessageBox.Information)
+        if first_run:
+            b_ok = box.addButton("我已阅读并同意", QMessageBox.AcceptRole)
+            b_quit = box.addButton("退出", QMessageBox.RejectRole)
+            box.exec()
+            if box.clickedButton() is b_quit:
+                QApplication.quit()
+                return
+            QSettings("ZipPwn", "ZipPwn").setValue("disclaimer/accepted", "true")
+            self._log("[i] 已确认免责声明：仅限授权用途")
+        else:
+            box.addButton("关闭", QMessageBox.AcceptRole)
+            box.exec()
 
     def _probe_gpu(self) -> None:
         if not self.core.ok:

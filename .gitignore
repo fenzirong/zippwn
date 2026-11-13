@@ -1,0 +1,37 @@
+# ---- 构建产物 ----
+build/
+dist/
+obj/
+*.obj
+*.exp
+*.lib
+*.pdb
+*.ilk
+
+# ---- 第三方依赖（hashcat 等本地下载的东西）----
+_deps/
+*.7z
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ---- PyInstaller ----
+*.spec
+build/pyi/
+
+# ---- 运行时临时文件 ----
+zippwn_gpu.hash
+zippwn_gpu.pot
+*.pot
+
+# ---- 编辑器 / 系统 ----
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.swp

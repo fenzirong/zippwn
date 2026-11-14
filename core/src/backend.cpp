@@ -30,11 +30,33 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>   // 仅用于 GetModuleFileNameW：定位 exe 同目录的 hashcat
+#endif
+
 #include "zpwn.hpp"
 
 namespace zpwn {
 
 namespace {
+
+// 当前进程 exe 所在目录。打包后 CWD 不一定是 exe 目录（从资源管理器双击、
+// 或从别的目录启动），所以"随包附带的 hashcat"必须按 exe 目录去找。
+std::string exe_dir() {
+#ifdef _WIN32
+    wchar_t buf[32768];
+    const DWORD n = GetModuleFileNameW(nullptr, buf, (DWORD)(sizeof(buf) / sizeof(buf[0])));
+    if (n > 0 && n < (DWORD)(sizeof(buf) / sizeof(buf[0]))) {
+        std::error_code ec;
+        const auto p = std::filesystem::path(std::wstring(buf, n)).parent_path();
+        return p.string();
+    }
+#endif
+    return {};
+}
 
 std::string hexstr(const uint8_t* p, size_t n) {
     static const char* H = "0123456789abcdef";
@@ -138,14 +160,27 @@ GpuInfo probe_hashcat(const std::string& hint) {
     // 2) 常见安装位置 + 相对当前工作目录的布局
     if (!g.available) {
         std::vector<std::string> roots;
+
+        // 2a) 随包附带：<exe目录>\hashcat\...（发布包把 hashcat 放在这里）
+        const std::string ed = exe_dir();
+        if (!ed.empty()) {
+            roots.push_back(ed + "\\hashcat");
+            roots.push_back(ed + "\\_deps\\hashcat");
+            roots.push_back(ed + "\\..\\hashcat");
+        }
+
+        // 2b) 系统常见安装位置
         if (const char* pf = std::getenv("ProgramFiles")) roots.push_back(std::string(pf) + "\\hashcat");
         if (const char* la = std::getenv("LOCALAPPDATA")) roots.push_back(std::string(la) + "\\hashcat");
         roots.push_back("C:\\hashcat");
         roots.push_back("C:\\tools\\hashcat");
+
+        // 2c) 相对当前工作目录（源码树里直接跑时用）
         roots.push_back("hashcat");
         roots.push_back("..\\hashcat");
         roots.push_back("_deps\\hashcat");
         roots.push_back("..\\_deps\\hashcat");
+
         for (const auto& r : roots) {
             const std::string hit = find_hashcat_under(r);
             if (!hit.empty()) { g.available = true; g.exe = hit; break; }

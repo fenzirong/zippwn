@@ -84,11 +84,29 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File tools/build.ps1 -SelfTest
 
-      - name: 打包 onedir
+      - name: 下载 hashcat（随包附带，开箱即用 GPU）
         shell: pwsh
-        run: pwsh -NoProfile -File tools/build_exe.ps1 -Onedir -SkipCore
+        run: |
+          $ver = '7.1.2'
+          $url = "https://hashcat.net/files/hashcat-$ver.7z"
+          Write-Host "下载 $url"
+          Invoke-WebRequest $url -OutFile hashcat.7z -UseBasicParsing -TimeoutSec 300
+          # windows-latest 自带 7-Zip；必须用 x（保留目录结构），e 会拍平导致模块加载失败
+          7z x hashcat.7z -ohashcat -y | Out-Null
+          $exe = Get-ChildItem hashcat -Recurse -Filter hashcat.exe | Select-Object -First 1
+          if (-not $exe) { throw 'hashcat 解压后找不到 hashcat.exe' }
+          Write-Host "hashcat: $($exe.FullName)"
+          Write-Host ("解压体积 {0:N1} MB" -f `
+            ((Get-ChildItem hashcat -Recurse -File | Measure-Object Length -Sum).Sum / 1MB))
 
-      - name: 打包 onefile
+      - name: 打包 onedir（含 hashcat）
+        shell: pwsh
+        run: |
+          $hc = (Get-ChildItem hashcat -Recurse -Filter hashcat.exe |
+                 Select-Object -First 1).DirectoryName
+          pwsh -NoProfile -File tools/build_exe.ps1 -Onedir -SkipCore -BundleHashcat $hc
+
+      - name: 打包 onefile（不含 hashcat）
         shell: pwsh
         run: pwsh -NoProfile -File tools/build_exe.ps1 -SkipCore
 
@@ -97,16 +115,24 @@ jobs:
         run: |
           $tag = '${{ github.ref_name }}'
           Compress-Archive -Path 'dist\ZipPwn\*' `
-            -DestinationPath "dist\ZipPwn-$tag-win64.zip" -CompressionLevel Optimal
+            -DestinationPath "dist\ZipPwn-$tag-win64-full.zip" -CompressionLevel Optimal
           Get-ChildItem dist -File | Select-Object Name, Length
 
-      - name: 冒烟检查（包内 DLL 与 exe 就位）
+      - name: 冒烟检查（包内 DLL / exe / hashcat 就位）
         shell: pwsh
         run: |
           $dll = 'dist\ZipPwn\_internal\zippwn.dll'
           if (-not (Test-Path $dll)) { throw '包内缺少 zippwn.dll' }
           if (-not (Test-Path 'dist\ZipPwn\ZipPwn.exe')) { throw '缺少 ZipPwn.exe' }
           if (-not (Test-Path 'dist\ZipPwn.exe')) { throw '缺少 onefile ZipPwn.exe' }
+          $hc = 'dist\ZipPwn\hashcat\hashcat.exe'
+          if (-not (Test-Path $hc)) { throw '包内缺少 hashcat.exe' }
+          $mods = (Get-ChildItem 'dist\ZipPwn\hashcat\modules' -Filter '*.dll').Count
+          if ($mods -lt 500) { throw "hashcat 模块不全：只有 $mods 个 dll" }
+          if ((Get-ChildItem 'dist\ZipPwn\hashcat' -Recurse -Filter '*.so').Count -gt 0) {
+            throw '包内混入了 Linux .so 模块'
+          }
+          Write-Host "hashcat 模块: $mods 个 dll"
           Write-Host ("onedir 总计 {0:N1} MB" -f `
             ((Get-ChildItem 'dist\ZipPwn' -Recurse -File | Measure-Object Length -Sum).Sum / 1MB))
           Write-Host ("onefile {0:N1} MB" -f ((Get-Item 'dist\ZipPwn.exe').Length / 1MB))
@@ -116,6 +142,6 @@ jobs:
         with:
           files: |
             dist/ZipPwn.exe
-            dist/ZipPwn-${{ github.ref_name }}-win64.zip
+            dist/ZipPwn-${{ github.ref_name }}-win64-full.zip
           generate_release_notes: true
           fail_on_unmatched_files: true

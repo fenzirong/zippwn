@@ -17,7 +17,10 @@
 
 param(
     [switch]$Onedir,
-    [switch]$SkipCore
+    [switch]$SkipCore,
+    # hashcat 解压目录（含 hashcat.exe）。指定后会把精简运行集复制进
+    # dist\ZipPwn\hashcat\，实现"开箱即用 GPU"。仅 onedir 支持。
+    [string]$BundleHashcat = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -95,7 +98,67 @@ Write-Host "==> PyInstaller ($mode)" -ForegroundColor Cyan
 & python -m PyInstaller @args
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller 失败 (exit $LASTEXITCODE)" }
 
-# ---- 5. 结果 ----
+# ---- 5. 可选：把 hashcat 精简运行集打进 onedir 包 ----
+if ($BundleHashcat) {
+    if (-not $Onedir) {
+        Write-Host '==> 跳过 hashcat 打包：onefile 模式不支持（会让单文件膨胀到 200MB+ 且每次启动解包）' -ForegroundColor Yellow
+    } else {
+        $src = $BundleHashcat
+        if (-not (Test-Path (Join-Path $src 'hashcat.exe'))) {
+            throw "BundleHashcat 目录里没有 hashcat.exe: $src"
+        }
+        $dst = Join-Path $dist 'ZipPwn\hashcat'
+        Write-Host "==> 打包 hashcat: $src -> $dst" -ForegroundColor Cyan
+        # 必须先建目录：否则 Copy-Item 会把第一个文件当成目标文件名
+        New-Item -ItemType Directory -Force -Path $dst | Out-Null
+
+        # 运行必需项。刻意排除：
+        #   modules\*.so  —— Linux 模块（Windows 用 .dll，582 个 .so 白占 166MB）
+        #   docs 其余     —— 只留 license/credits 满足 MIT 署名
+        #   bridges/Rust/Python/tools/extra/example* —— 开发用，运行不需要
+        $items = @('hashcat.exe', 'hashcat.hcstat2', 'hashcat.dictstat2',
+                   'OpenCL', 'kernels', 'tunings', 'charsets', 'masks',
+                   'layouts', 'rules')
+        foreach ($i in $items) {
+            $p = Join-Path $src $i
+            if (Test-Path $p) { Copy-Item $p -Destination $dst -Recurse -Force }
+        }
+        New-Item -ItemType Directory -Force -Path (Join-Path $dst 'modules') | Out-Null
+        Copy-Item (Join-Path $src 'modules\*.dll') -Destination (Join-Path $dst 'modules') -Force
+        New-Item -ItemType Directory -Force -Path (Join-Path $dst 'docs') | Out-Null
+        foreach ($d in 'license.txt', 'credits.txt') {
+            $p = Join-Path $src "docs\$d"
+            if (Test-Path $p) { Copy-Item $p -Destination (Join-Path $dst 'docs') -Force }
+        }
+
+        # MIT 许可要求保留版权与许可声明
+        @'
+This directory contains hashcat, bundled for convenience.
+
+  hashcat — advanced password recovery
+  https://hashcat.net/  ·  https://github.com/hashcat/hashcat
+  License: MIT (see docs/license.txt)
+  Credits: see docs/credits.txt
+
+Bundled files are a trimmed runtime set (Windows only):
+  hashcat.exe, hashcat.hcstat2, hashcat.dictstat2,
+  OpenCL/, kernels/, tunings/, charsets/, masks/, layouts/, rules/,
+  modules/*.dll, docs/license.txt, docs/credits.txt
+
+Excluded (not needed at runtime): modules/*.so (Linux), bridges/,
+Rust/, Python/, tools/, extra/, example*.
+
+ZipPwn does not modify hashcat. All hashcat code remains under its own
+MIT license; see docs/license.txt for the full text.
+'@ | Set-Content -Path (Join-Path $dst 'BUNDLED.txt') -Encoding UTF8
+
+        $hcSize = (Get-ChildItem $dst -Recurse -File | Measure-Object Length -Sum).Sum
+        Write-Host ("    hashcat: {0:N1} MB / {1} files" -f ($hcSize / 1MB),
+                    (Get-ChildItem $dst -Recurse -File).Count) -ForegroundColor Gray
+    }
+}
+
+# ---- 6. 结果 ----
 $exe = if ($Onedir) { Join-Path $dist 'ZipPwn\ZipPwn.exe' } else { Join-Path $dist 'ZipPwn.exe' }
 if (-not (Test-Path $exe)) { throw "未生成 $exe" }
 
@@ -110,5 +173,9 @@ if ($Onedir) {
     Write-Host ("    目录总计 {0:N1} MB" -f ($total / 1MB))
 }
 Write-Host ''
-Write-Host '可直接双击运行。GPU 加速需另装 hashcat 并设置：' -ForegroundColor Gray
-Write-Host '    setx ZIPPWN_HASHCAT "C:\path\to\hashcat.exe"' -ForegroundColor Gray
+if ($BundleHashcat -and $Onedir) {
+    Write-Host 'GPU 开箱即用：hashcat 已随包附带，启动时自动探测。' -ForegroundColor Gray
+} else {
+    Write-Host 'GPU 加速需另装 hashcat 并设置：' -ForegroundColor Gray
+    Write-Host '    setx ZIPPWN_HASHCAT "C:\path\to\hashcat.exe"' -ForegroundColor Gray
+}

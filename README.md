@@ -78,13 +78,15 @@ $env:ZIPPWN_HASHCAT = "C:\path\to\hashcat.exe"
 ```powershell
 pwsh -File tools\build_exe.ps1            # 单文件（默认）
 pwsh -File tools\build_exe.ps1 -Onedir    # 目录版（启动更快）
+pwsh -File tools\build_exe.ps1 -Onedir -BundleHashcat "D:\tools\hashcat-7.1.2"   # 含 hashcat
 ```
 
 | 产物 | 体积 | 说明 |
 |---|---|---|
-| `dist\ZipPwn.exe` | 36.4 MB | 单文件，双击即用；启动时解包到 `%TEMP%\_MEIxxxx` |
-| `dist\ZipPwn\ZipPwn.exe` | 1.7 MB（目录 93.9 MB） | onedir，不解包、启动快，适合压缩分发 |
+| `dist\ZipPwn.exe` | 36.4 MB | 单文件，双击即用；启动时解包到 `%TEMP%\_MEIxxxx`。**不含 hashcat** |
+| `dist\ZipPwn\ZipPwn.exe` | 1.7 MB（目录 93.9 MB） | onedir，不解包、启动快。**不含 hashcat** |
 | `dist\ZipPwn-0.4.0-win64.zip` | 37.5 MB | 上面 onedir 的现成压缩包 |
+| `dist\ZipPwn-0.4.0-win64-full.zip` | 120 MB | onedir **+ 随包 hashcat**，GPU 开箱即用（解压后 288 MB） |
 | `build\zippwn.exe` | 234 KB | 纯 C++ 命令行版，**零依赖**，可单独拷走 |
 
 关键点：
@@ -95,8 +97,25 @@ pwsh -File tools\build_exe.ps1 -Onedir    # 目录版（启动更快）
   GUI 用 `sys._MEIPASS`（onefile）与 exe 同目录（onedir）双路径查找，源码运行也兼容。
 - 已排掉 `tkinter / unittest / pydoc / numpy / PIL`，体积从 ~110 MB 压到 36 MB。
 - exe 带版本信息资源（0.4.0.0，中文描述），资源管理器里属性正常。
-- **hashcat 不打进包**（200 MB+ 且需匹配本机驱动）。需要 GPU 时另装并设置
-  `ZIPPWN_HASHCAT`，包内 GUI 的「GPU 加速」页会自动探测。
+
+### 随包 hashcat（`-BundleHashcat`）
+
+`-BundleHashcat <hashcat解压目录>` 会把 hashcat 的**精简运行集**复制到
+`dist\ZipPwn\hashcat\`，实现 GPU 开箱即用：
+
+| 包含 | 排除（运行不需要） |
+|---|---|
+| `hashcat.exe`、`hashcat.hcstat2`、`hashcat.dictstat2` | `modules\*.so`（Linux 模块，582 个共 166 MB） |
+| `OpenCL\`（内核源码，必需）、`kernels\`、`tunings\` | `bridges\`、`Rust\`、`Python\`、`tools\`、`extra\` |
+| `charsets\`、`masks\`、`layouts\`、`rules\` | `docs\` 其余内容、`example*` |
+| `modules\*.dll`（**582 个全要**，少一个启动即 fatal） | |
+
+精简后 **193.7 MB / 2428 文件**（原始 375 MB）。C++ 侧按 **exe 同目录** 探测
+（`GetModuleFileNameW`），所以从任何工作目录启动都能找到随包 hashcat。
+
+> hashcat 以 MIT 许可分发，版权归其作者所有。包内保留 `hashcat\docs\license.txt`
+> 与 `credits.txt`，并附 `hashcat\BUNDLED.txt` 说明来源与裁剪范围。
+> 项目主页：<https://hashcat.net/> · <https://github.com/hashcat/hashcat>
 
 > 环境提示：某些受限账户/沙箱环境下 `%TEMP%` 对子进程不可写，onefile 会报
 > `Could not create temporary directory!`。此时改用 onedir 版，或把 `TMP`/`TEMP`

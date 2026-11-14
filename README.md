@@ -1,5 +1,9 @@
 # ZipPwn —— 压缩包口令恢复 / 取证工作台
 
+[![CI](https://github.com/fenzirong/zippwn/actions/workflows/ci.yml/badge.svg)](https://github.com/fenzirong/zippwn/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)
+
 C++20 内核 + PySide6 界面的 ZIP 口令恢复工具。原生 CPU 多线程引擎处理 ZipCrypto / WinZip AES，
 GPU 后端经 hashcat 处理全部格式。所有算法都带官方向量自测，能力矩阵里的每一项都是**实测跑通**的。
 

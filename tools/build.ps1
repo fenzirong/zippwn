@@ -30,9 +30,23 @@ if (-not (Test-Path $vcvars)) {
         if ($vsPath) { $vcvars = Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat' }
     }
 }
+# 兜底：GitHub Actions 的 windows-latest 把 VS 装在 Enterprise/Professional 目录，
+# 且 vswhere 偶尔因组件 ID 差异匹配不到，这里直接按通配再找一遍
+if (-not (Test-Path $vcvars)) {
+    $glob = @(
+        'C:\Program Files\Microsoft Visual Studio\2022\*\VC\Auxiliary\Build\vcvars64.bat',
+        'C:\Program Files (x86)\Microsoft Visual Studio\2022\*\VC\Auxiliary\Build\vcvars64.bat',
+        'C:\Program Files\Microsoft Visual Studio\2019\*\VC\Auxiliary\Build\vcvars64.bat'
+    )
+    foreach ($g in $glob) {
+        $hit = Get-ChildItem $g -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($hit) { $vcvars = $hit.FullName; break }
+    }
+}
 if (-not (Test-Path $vcvars)) {
     throw "找不到 vcvars64.bat，请先安装 Visual Studio Build Tools（C++ 工作负载）"
 }
+Write-Host "==> 工具链: $vcvars" -ForegroundColor Gray
 
 if ($Clean -and (Test-Path $build)) { Remove-Item -Recurse -Force $build }
 New-Item -ItemType Directory -Force -Path $obj | Out-Null

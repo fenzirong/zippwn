@@ -93,9 +93,12 @@ GpuInfo probe_hashcat(const std::string& hint) {
     if (!hint.empty()) cands.push_back(hint);
     if (const char* e = std::getenv("ZIPPWN_HASHCAT")) cands.push_back(e);
 
-    cands.push_back("D:\\AI\\deepseek\\_deps\\hashcat\\hashcat-7.1.2\\hashcat.exe");
     cands.push_back("C:\\hashcat\\hashcat.exe");
     cands.push_back("C:\\tools\\hashcat\\hashcat.exe");
+    // 相对当前工作目录的常见布局：把 hashcat 解压到项目旁边即可直接用
+    cands.push_back("hashcat\\hashcat.exe");
+    cands.push_back("..\\hashcat\\hashcat.exe");
+    cands.push_back("_deps\\hashcat\\hashcat.exe");
     const std::string w = which("hashcat.exe");
     if (!w.empty()) cands.push_back(w);
 

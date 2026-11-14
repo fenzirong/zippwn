@@ -1,10 +1,14 @@
-"""底层密码学原语。零外部依赖（仅标准库 + numpy）。
+"""底层密码学原语。零外部依赖（仅标准库；numpy 为可选加速）。
 
 包含：
-  * CRC32 表（ZipCrypto 流密码状态推进 / 向量化索引）
+  * CRC32 表（ZipCrypto 流密码状态推进）
   * AES 128/192/256（key expansion + 单块加解密）
   * WinZip-AES 专用 CTR 模式（小端 128 位计数器，从 1 开始）
   * PBKDF2-HMAC-SHA1 / SHA256 薄封装（走 hashlib 的 C 实现）
+
+numpy 说明：核心引擎已迁移到 C++，Python 侧只剩测试样本生成器在用本模块。
+CRC_TAB（numpy 数组）仅为历史向量化路径保留，未安装 numpy 时自动降级为 None，
+因此 `tools/make_fixtures.py` 在纯净 Python 环境下也能跑（CI 无需装 numpy）。
 """
 
 from __future__ import annotations
@@ -12,21 +16,28 @@ from __future__ import annotations
 import hashlib
 import hmac as _hmac
 
-import numpy as np
+try:  # numpy 可选：没有也能跑，只是拿不到向量化用的 CRC_TAB
+    import numpy as np
+except ImportError:  # pragma: no cover
+    np = None  # type: ignore[assignment]
 
 # ============================================================ CRC32
-def _build_crc_table() -> np.ndarray:
-    tab = np.zeros(256, dtype=np.uint32)
+def _build_crc_table_int() -> list[int]:
+    tab: list[int] = []
     for i in range(256):
         c = i
         for _ in range(8):
             c = (0xEDB88320 ^ (c >> 1)) if (c & 1) else (c >> 1)
-        tab[i] = np.uint32(c)
+        tab.append(c)
     return tab
 
 
-CRC_TAB: np.ndarray = _build_crc_table()
-CRC_TAB_INT: list[int] = [int(x) for x in CRC_TAB]
+CRC_TAB_INT: list[int] = _build_crc_table_int()
+
+# 向量化路径用的 numpy 视图；无 numpy 时为 None
+CRC_TAB = None
+if np is not None:
+    CRC_TAB = np.array(CRC_TAB_INT, dtype=np.uint32)
 
 
 def crc32(data: bytes, crc: int = 0) -> int:

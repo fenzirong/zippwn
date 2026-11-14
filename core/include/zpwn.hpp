@@ -195,6 +195,10 @@ struct GpuInfo {
 };
 GpuInfo probe_hashcat(const std::string& hint = "");
 
+// 手动指定 hashcat 路径（文件或目录均可），优先级高于环境变量与自动探测。
+// 传空串表示清除。GUI 用它持久化用户选择。
+void set_hashcat_path(const std::string& path);
+
 struct GpuRun {
     bool found = false;
     std::string password;

@@ -85,29 +85,91 @@ std::string read_all(const std::string& path) {
     return o.str();
 }
 
+// 在 root 下找 hashcat.exe：先看 root 本身，再看 root\*\hashcat.exe。
+// 后者是官方发行包解压后的真实布局（hashcat-7.1.2\hashcat.exe），
+// 只写死 root\hashcat.exe 会漏掉——这是之前"探测不到"的直接原因。
+std::string find_hashcat_under(const std::string& root) {
+    if (root.empty()) return {};
+    std::error_code ec;
+    const std::string direct = (std::filesystem::path(root) / "hashcat.exe").string();
+    if (file_exists(direct)) return direct;
+    if (!std::filesystem::is_directory(root, ec)) return {};
+    std::vector<std::string> subs;
+    for (const auto& e : std::filesystem::directory_iterator(root, ec)) {
+        if (ec) break;
+        if (!e.is_directory(ec)) continue;
+        subs.push_back(e.path().string());
+    }
+    std::sort(subs.begin(), subs.end());   // 稳定顺序，便于复现
+    for (const auto& s : subs) {
+        const std::string cand = (std::filesystem::path(s) / "hashcat.exe").string();
+        if (file_exists(cand)) return cand;
+    }
+    return {};
+}
+
+// GUI 手动指定的路径（优先级最高）
+std::string g_hashcat_override;
+
 }  // namespace
+
+void set_hashcat_path(const std::string& path) { g_hashcat_override = path; }
 
 GpuInfo probe_hashcat(const std::string& hint) {
     GpuInfo g;
-    std::vector<std::string> cands;
-    if (!hint.empty()) cands.push_back(hint);
-    if (const char* e = std::getenv("ZIPPWN_HASHCAT")) cands.push_back(e);
 
-    cands.push_back("C:\\hashcat\\hashcat.exe");
-    cands.push_back("C:\\tools\\hashcat\\hashcat.exe");
-    // 相对当前工作目录的常见布局：把 hashcat 解压到项目旁边即可直接用
-    cands.push_back("hashcat\\hashcat.exe");
-    cands.push_back("..\\hashcat\\hashcat.exe");
-    cands.push_back("_deps\\hashcat\\hashcat.exe");
-    const std::string w = which("hashcat.exe");
-    if (!w.empty()) cands.push_back(w);
+    // 1) 手动指定 / 调用方 hint / 环境变量：都按"文件或目录"两种形态接受
+    auto try_path = [&](const std::string& p) -> bool {
+        if (p.empty()) return false;
+        std::error_code ec;
+        if (std::filesystem::is_directory(p, ec)) {
+            const std::string hit = find_hashcat_under(p);
+            if (!hit.empty()) { g.available = true; g.exe = hit; return true; }
+            return false;
+        }
+        if (file_exists(p)) { g.available = true; g.exe = p; return true; }
+        return false;
+    };
 
-    for (const auto& c : cands) {
-        if (file_exists(c)) { g.available = true; g.exe = c; break; }
-    }
+    if (try_path(g_hashcat_override)) { /* 用户指定优先 */ }
+    else if (try_path(hint)) { /* 调用方 hint */ }
+    else if (const char* e = std::getenv("ZIPPWN_HASHCAT"); e && try_path(e)) { /* 环境变量 */ }
+
+    // 2) 常见安装位置 + 相对当前工作目录的布局
     if (!g.available) {
-        g.note = "未找到 hashcat.exe；可设置环境变量 ZIPPWN_HASHCAT 指向它";
+        std::vector<std::string> roots;
+        if (const char* pf = std::getenv("ProgramFiles")) roots.push_back(std::string(pf) + "\\hashcat");
+        if (const char* la = std::getenv("LOCALAPPDATA")) roots.push_back(std::string(la) + "\\hashcat");
+        roots.push_back("C:\\hashcat");
+        roots.push_back("C:\\tools\\hashcat");
+        roots.push_back("hashcat");
+        roots.push_back("..\\hashcat");
+        roots.push_back("_deps\\hashcat");
+        roots.push_back("..\\_deps\\hashcat");
+        for (const auto& r : roots) {
+            const std::string hit = find_hashcat_under(r);
+            if (!hit.empty()) { g.available = true; g.exe = hit; break; }
+        }
+    }
+
+    // 3) PATH
+    if (!g.available) {
+        const std::string w = which("hashcat.exe");
+        if (!w.empty()) { g.available = true; g.exe = w; }
+    }
+
+    if (!g.available) {
+        g.note = "未找到 hashcat.exe。可在「GPU 加速」页手动指定路径，"
+                 "或设置环境变量 ZIPPWN_HASHCAT";
         return g;
+    }
+
+    // 统一成绝对路径：后续要 `cd` 到 hashcat 目录再调用，
+    // 相对路径（如 ..\_deps\hashcat\hashcat-7.1.2\hashcat.exe）在 cd 之后会失效。
+    {
+        std::error_code ec;
+        const auto abs = std::filesystem::absolute(g.exe, ec);
+        if (!ec) g.exe = abs.lexically_normal().string();
     }
 
     // hashcat 以自身目录为工作目录才能找到 ./OpenCL/ 内核

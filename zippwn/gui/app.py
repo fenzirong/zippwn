@@ -98,6 +98,7 @@ class Core:
                                            ctypes.c_size_t, PROGRESS_CB, ctypes.c_void_p,
                                            ctypes.POINTER(ctypes.c_int)]
                 lib.zpwn_gpu_info.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+                lib.zpwn_set_hashcat_path.argtypes = [ctypes.c_char_p]
                 lib.zpwn_gpu_crack.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
                                                ctypes.c_char_p, ctypes.c_size_t]
                 lib.zpwn_export_hash.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t]
@@ -145,6 +146,11 @@ class Core:
             return json.loads(self._call_str(self.lib.zpwn_gpu_info, cap=1 << 16))
         except Exception:
             return {"available": False}
+
+    def set_hashcat_path(self, path: str) -> None:
+        """手动指定 hashcat 路径（文件或目录），空串表示回到自动探测。"""
+        if self.lib:
+            self.lib.zpwn_set_hashcat_path(path.encode())
 
     def selftest(self) -> str:
         return self._call_str(self.lib.zpwn_selftest, cap=1 << 16)
@@ -227,6 +233,12 @@ class MainWindow(QMainWindow):
             self.btn_start.setEnabled(False)
         else:
             self._log(f"[+] 内核已加载: {core.path}  (version {core.version()})")
+            # 恢复上次手动指定的 hashcat 路径，并自动探测一次 GPU 后端
+            saved_hc = str(QSettings("ZipPwn", "ZipPwn").value("hashcat/path", "") or "")
+            if saved_hc:
+                self.ed_hashcat.setText(saved_hc)
+                core.set_hashcat_path(saved_hc)
+            QTimer.singleShot(600, self._probe_gpu)
 
     # ---------------- UI 构建 ----------------
     def _build_ui(self) -> None:
@@ -343,12 +355,30 @@ class MainWindow(QMainWindow):
         # -- GPU --
         t_gpu = QWidget()
         gv = QVBoxLayout(t_gpu)
-        self.lb_gpu = QLabel("点击下方按钮探测 hashcat")
-        self.lb_gpu.setWordWrap(True)
-        gv.addWidget(self.lb_gpu)
+
+        gv.addWidget(QLabel("hashcat 路径（可填 hashcat.exe 或它所在的目录；留空则自动探测）"))
+        row_hc = QHBoxLayout()
+        self.ed_hashcat = QLineEdit()
+        self.ed_hashcat.setPlaceholderText(r"例如 D:\tools\hashcat-7.1.2\hashcat.exe")
+        row_hc.addWidget(self.ed_hashcat, 1)
+        b_hc = QPushButton("浏览…")
+        b_hc.clicked.connect(self._browse_hashcat)
+        row_hc.addWidget(b_hc)
+        gv.addLayout(row_hc)
+
+        row_btn = QHBoxLayout()
         bg = QPushButton("探测 GPU 后端")
         bg.clicked.connect(self._probe_gpu)
-        gv.addWidget(bg)
+        row_btn.addWidget(bg)
+        b_clear = QPushButton("清除")
+        b_clear.clicked.connect(self._clear_hashcat)
+        row_btn.addWidget(b_clear)
+        row_btn.addStretch(1)
+        gv.addLayout(row_btn)
+
+        self.lb_gpu = QLabel("尚未探测")
+        self.lb_gpu.setWordWrap(True)
+        gv.addWidget(self.lb_gpu)
         gv.addWidget(QLabel("GPU 模式使用「字典攻击」页的字典，走 hashcat 内核"))
         gv.addStretch(1)
         self.tabs.addTab(t_gpu, "GPU 加速")
@@ -534,15 +564,44 @@ class MainWindow(QMainWindow):
             box.addButton("关闭", QMessageBox.AcceptRole)
             box.exec()
 
+    # ---------------- hashcat 路径配置 ----------------
+    def _apply_hashcat_path(self) -> None:
+        """把输入框里的路径同步给内核并持久化（空串 = 清除，回到自动探测）。"""
+        p = self.ed_hashcat.text().strip()
+        if self.core.ok:
+            self.core.set_hashcat_path(p)
+        QSettings("ZipPwn", "ZipPwn").setValue("hashcat/path", p)
+
+    def _browse_hashcat(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择 hashcat.exe", "",
+            "hashcat (hashcat.exe);;所有文件 (*.*)")
+        if not path:
+            return
+        self.ed_hashcat.setText(path)
+        self._apply_hashcat_path()
+        self._probe_gpu()
+
+    def _clear_hashcat(self) -> None:
+        self.ed_hashcat.clear()
+        self._apply_hashcat_path()
+        self._probe_gpu()
+
     def _probe_gpu(self) -> None:
         if not self.core.ok:
             return
+        self._apply_hashcat_path()
         g = self.core.gpu_info()
         if not g.get("available"):
-            self.lb_gpu.setText("hashcat 不可用：" + g.get("note", ""))
+            self.lb_gpu.setText(
+                "<b style='color:#ff9d9d'>hashcat 不可用</b><br>"
+                + (g.get("note") or "")
+                + "<br><br>可点「浏览…」手动指定 hashcat.exe，或设置环境变量 "
+                  "<code>ZIPPWN_HASHCAT</code>。")
+            self._log("[!] GPU 后端不可用：" + (g.get("note") or ""))
             return
         devs = g.get("devices") or []
-        html = (f"<b>hashcat 可用</b><br>{g.get('exe')}<br>"
+        html = (f"<b style='color:#6ee787'>hashcat 可用</b><br>{g.get('exe')}<br>"
                 f"{g.get('version','')}<br><br><b>设备</b><br>")
         html += "<br>".join(f"· {d}" for d in devs) if devs else "（未解析到设备）"
         self.lb_gpu.setText(html)

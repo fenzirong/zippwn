@@ -231,6 +231,10 @@ ZPWN_API int zpwn_crack(const char* path, const char* cfg, char* out, size_t cap
     return 0;
 }
 
+ZPWN_API void zpwn_set_hashcat_path(const char* path) {
+    zpwn::set_hashcat_path(path ? std::string(path) : std::string());
+}
+
 ZPWN_API int zpwn_gpu_info(char* buf, size_t cap) {
     const auto g = zpwn::probe_hashcat();
     std::ostringstream o;
